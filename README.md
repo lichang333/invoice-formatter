@@ -12,13 +12,17 @@
 
 ## 使用方式
 
-直接用浏览器打开 `invoice-formatter.html`：
+直接用浏览器打开 `index.html`：
 
 ```bash
-open invoice-formatter.html
+open index.html
 ```
 
 也可以把文件部署到任意静态网页托管服务。
+
+## 在线访问
+
+GitHub Pages 部署后可通过仓库的 Pages 地址直接使用。
 
 ## 技术说明
 

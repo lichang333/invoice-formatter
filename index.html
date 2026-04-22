@@ -704,7 +704,15 @@ async function importLinks() {
 
 function extractUrls(text) {
   return [...new Set((text.match(/https?:\/\/[^\s，,]+/g) || [])
-    .map(url => url.replace(/[)\]}>。；;]+$/g, '')))];
+    .map(cleanUrl)
+    .filter(Boolean))];
+}
+
+function cleanUrl(url) {
+  return url
+    .trim()
+    .replace(/^[“”"'<({\[【]+/g, '')
+    .replace(/[“”"')\]}>】。；;，,]+$/g, '');
 }
 
 async function fetchPdfFromUrl(url, index) {

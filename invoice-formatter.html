@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>发票排版工具 · Invoice Formatter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f3ef;
+    --surface: #ffffff;
+    --ink: #1a1a1a;
+    --ink-muted: #6b6b6b;
+    --accent: #c84b31;
+    --accent-light: #f5ede9;
+    --border: #e0ddd8;
+    --stamp: #c84b31;
+    --success: #2d6a4f;
+  }
+
+  body {
+    font-family: 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  header {
+    background: var(--ink);
+    color: #fff;
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--accent);
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .logo-stamp {
+    width: 42px;
+    height: 42px;
+    border: 2.5px solid var(--accent);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.1;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .logo-text h1 {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .logo-text p {
+    font-size: 11px;
+    color: #999;
+    font-family: 'Space Mono', monospace;
+    margin-top: 1px;
+  }
+  .header-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: #666;
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* Main */
+  main {
+    flex: 1;
+    max-width: 900px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  /* Upload Zone */
+  .upload-zone {
+    background: var(--surface);
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 52px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .upload-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  .upload-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    display: block;
+  }
+  .upload-zone h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .upload-zone p {
+    color: var(--ink-muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .upload-zone .hint {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* File List */
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 36px 0 14px;
+    font-family: 'Space Mono', monospace;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .file-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    position: relative;
+    transition: border-color 0.15s;
+  }
+  .file-card:hover { border-color: var(--accent); }
+  .file-card .num {
+    width: 24px;
+    height: 24px;
+    background: var(--ink);
+    color: #fff;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name {
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .file-size {
+    font-size: 11px;
+    color: var(--ink-muted);
+    font-family: 'Space Mono', monospace;
+  }
+  .file-remove {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #ccc;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .file-remove:hover { color: var(--accent); }
+
+  /* Pair Preview */
+  .pair-preview {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .pair-preview .sheet {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    flex: 1;
+    aspect-ratio: 210/148;
+    display: flex;
+    gap: 2px;
+    padding: 6px;
+    overflow: hidden;
+  }
+  .mini-invoice {
+    flex: 1;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--ink-muted);
+    text-align: center;
+    padding: 4px;
+    line-height: 1.3;
+  }
+  .mini-invoice.empty {
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      #f0ede8 3px,
+      #f0ede8 6px
+    );
+    border: 1px dashed #ddd;
+  }
+  .pair-divider {
+    width: 1px;
+    background: #e0ddd8;
+    align-self: stretch;
+    margin: 6px 0;
+  }
+  .pair-meta {
+    flex: 0 0 120px;
+    font-size: 12px;
+    color: var(--ink-muted);
+    line-height: 1.7;
+  }
+  .pair-meta strong { color: var(--ink); font-weight: 600; }
+
+  /* Settings */
+  .settings-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .setting-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .setting-item label { color: var(--ink-muted); font-weight: 500; }
+  .setting-item select, .setting-item input[type="number"] {
+    border: 1px solid var(--border);
+    background: var(--bg);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 13px;
+    font-family: 'Noto Sans SC', sans-serif;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .setting-item select:focus, .setting-item input[type="number"]:focus {
+    border-color: var(--accent);
+  }
+  .setting-item input[type="number"] { width: 70px; }
+
+  /* Actions */
+  .actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Noto Sans SC', sans-serif;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    letter-spacing: 0.3px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { background: #b03d27; transform: translateY(-1px); }
+  .btn-primary:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+  .btn-secondary {
+    background: transparent;
+    color: var(--ink-muted);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--ink-muted); color: var(--ink); }
+
+  /* Progress */
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 16px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+  }
+  .progress-text {
+    font-size: 12px;
+    color: var(--ink-muted);
+    font-family: 'Space Mono', monospace;
+    margin-top: 8px;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    background: var(--success);
+    color: white;
+    padding: 14px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.error { background: var(--accent); }
+
+  /* Empty State */
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--ink-muted);
+    font-size: 13px;
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 20px;
+    flex: 1;
+    min-width: 120px;
+  }
+  .stat-num {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: 'Space Mono', monospace;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-label {
+    font-size: 11px;
+    color: var(--ink-muted);
+    font-weight: 500;
+  }
+
+  @media (max-width: 600px) {
+    header { padding: 16px 20px; }
+    main { padding: 24px 16px; }
+    .settings-row { flex-direction: column; align-items: flex-start; gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-stamp">发<br>票</div>
+    <div class="logo-text">
+      <h1>发票排版工具</h1>
+      <p>Invoice 2-UP Formatter · A4 双联打印</p>
+    </div>
+  </div>
+  <div class="header-badge">
+    增值税电子发票<br>A4 双拼排版输出
+  </div>
+</header>
+
+<main>
+
+  <!-- Upload Zone -->
+  <div class="upload-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf" multiple>
+    <span class="upload-icon">📄</span>
+    <h2>上传电子发票 PDF</h2>
+    <p>支持批量上传多张发票，每张发票为独立 PDF 文件<br>拖拽或点击选择文件</p>
+    <div class="hint">↑ CLICK OR DRAG &amp; DROP · PDF ONLY</div>
+  </div>
+
+  <!-- File List -->
+  <div id="fileSection" style="display:none">
+    <div class="section-title">已添加发票</div>
+
+    <div class="stats-row" id="statsRow">
+      <div class="stat">
+        <div class="stat-num" id="statTotal">0</div>
+        <div class="stat-label">发票张数</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="statPages">0</div>
+        <div class="stat-label">输出页数</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="statSaved">0%</div>
+        <div class="stat-label">节省纸张</div>
+      </div>
+    </div>
+
+    <div class="file-grid" id="fileGrid"></div>
+
+    <!-- Settings -->
+    <div class="section-title" style="margin-top:28px">排版设置</div>
+    <div class="settings-row">
+      <div class="setting-item">
+        <label>布局方向</label>
+        <select id="layoutDir">
+          <option value="vertical">纵向（发票上下排）</option>
+          <option value="horizontal">横向（发票左右排）</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>页边距</label>
+        <input type="number" id="marginPx" value="12" min="0" max="30"> mm
+      </div>
+      <div class="setting-item">
+        <label>发票间距</label>
+        <input type="number" id="gapPx" value="8" min="0" max="30"> mm
+      </div>
+      <div class="setting-item">
+        <label>缩放比例</label>
+        <select id="scaleMode">
+          <option value="fit">自动适合（推荐）</option>
+          <option value="50">固定 50%</option>
+          <option value="48">固定 48%</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Preview schematic -->
+    <div class="section-title" style="margin-top:28px">排版预览</div>
+    <div class="pair-preview" id="pairPreview">
+      <div class="sheet" id="previewSheet">
+        <div class="mini-invoice" id="previewLeft">发票 1</div>
+        <div class="pair-divider"></div>
+        <div class="mini-invoice" id="previewRight">发票 2</div>
+      </div>
+      <div class="pair-meta" id="pairMeta">
+        <strong>A4 横向输出</strong><br>
+        210 × 297 mm<br>
+        每页容纳 2 张<br>
+        <span style="color:var(--accent)">← 示意图</span>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="section-title" style="margin-top:28px">生成输出</div>
+    <div class="actions">
+      <button class="btn btn-primary" id="generateBtn" onclick="generate()">
+        <span>🖨️</span> 生成排版 PDF
+      </button>
+      <button class="btn btn-secondary" onclick="clearAll()">清空列表</button>
+    </div>
+
+    <div id="progressWrap" style="display:none">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">正在处理...</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- pdf-lib -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<!-- PDF.js for rendering preview thumbnails -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+const { PDFDocument, degrees } = PDFLib;
+
+// State
+let files = []; // Array of {file, name, size}
+
+// PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// --- Upload Handling ---
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  addFiles([...e.dataTransfer.files]);
+});
+fileInput.addEventListener('change', () => {
+  addFiles([...fileInput.files]);
+  fileInput.value = '';
+});
+
+function addFiles(newFiles) {
+  const pdfs = newFiles.filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
+  if (pdfs.length === 0) { showToast('请上传 PDF 格式的发票文件', true); return; }
+  pdfs.forEach(f => {
+    if (!files.find(x => x.name === f.name && x.size === f.size)) {
+      files.push({ file: f, name: f.name, size: f.size });
+    }
+  });
+  renderFileList();
+  showToast(`已添加 ${pdfs.length} 张发票`);
+}
+
+function removeFile(idx) {
+  files.splice(idx, 1);
+  renderFileList();
+}
+
+function clearAll() {
+  files = [];
+  renderFileList();
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / (1024*1024)).toFixed(1) + ' MB';
+}
+
+function renderFileList() {
+  const section = document.getElementById('fileSection');
+  const grid = document.getElementById('fileGrid');
+  if (files.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  grid.innerHTML = files.map((f, i) => `
+    <div class="file-card">
+      <div class="num">${String(i+1).padStart(2,'0')}</div>
+      <div class="file-info">
+        <div class="file-name" title="${f.name}">${f.name}</div>
+        <div class="file-size">${formatSize(f.size)}</div>
+      </div>
+      <button class="file-remove" onclick="removeFile(${i})" title="移除">×</button>
+    </div>
+  `).join('');
+
+  // Stats
+  const total = files.length;
+  const pages = Math.ceil(total / 2);
+  const saved = total > 0 ? Math.round((1 - pages / total) * 100) : 0;
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statPages').textContent = pages;
+  document.getElementById('statSaved').textContent = saved + '%';
+
+  updatePreview();
+}
+
+// Update schematic preview
+const layoutDir = document.getElementById('layoutDir');
+layoutDir.addEventListener('change', updatePreview);
+
+function updatePreview() {
+  const dir = layoutDir.value;
+  const sheet = document.getElementById('previewSheet');
+  const divider = sheet.querySelector('.pair-divider');
+  const meta = document.getElementById('pairMeta');
+
+  if (dir === 'vertical') {
+    sheet.style.flexDirection = 'column';
+    sheet.style.aspectRatio = '210/297';
+    divider.style.width = '100%';
+    divider.style.height = '1px';
+    meta.innerHTML = '<strong>A4 纵向输出</strong><br>210 × 297 mm<br>每页容纳 2 张<br><span style="color:var(--accent)">← 示意图</span>';
+  } else {
+    sheet.style.flexDirection = 'row';
+    sheet.style.aspectRatio = '297/210';
+    divider.style.width = '1px';
+    divider.style.height = 'auto';
+    meta.innerHTML = '<strong>A4 横向输出</strong><br>297 × 210 mm<br>每页容纳 2 张<br><span style="color:var(--accent)">← 示意图</span>';
+  }
+}
+
+// --- PDF Generation ---
+async function generate() {
+  if (files.length === 0) { showToast('请先上传发票 PDF', true); return; }
+
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressText = document.getElementById('progressText');
+  progressWrap.style.display = 'block';
+
+  const setProgress = (pct, text) => {
+    progressFill.style.width = pct + '%';
+    progressText.textContent = text;
+  };
+
+  try {
+    const dir = layoutDir.value; // 'horizontal' | 'vertical'
+    const gap = parseFloat(document.getElementById('gapPx').value) || 4; // mm
+    const margin = parseFloat(document.getElementById('marginPx').value) || 0; // mm
+    const scaleMode = document.getElementById('scaleMode').value;
+
+    // A4 dimensions in points (1pt = 1/72 inch; 1mm = 2.8346pt)
+    const mm = 2.8346;
+    const A4_W = 210 * mm; // 595.3
+    const A4_H = 297 * mm; // 841.9
+    const GAP = gap * mm;
+    const MARGIN = margin * mm;
+
+    // Output page size
+    let outW, outH;
+    if (dir === 'horizontal') { outW = A4_H; outH = A4_W; } // Landscape
+    else { outW = A4_W; outH = A4_H; } // Portrait
+
+    const outDoc = await PDFDocument.create();
+
+    // Load all source PDFs
+    setProgress(5, '正在读取发票文件...');
+    const srcPages = [];
+    for (let i = 0; i < files.length; i++) {
+      const buf = await files[i].file.arrayBuffer();
+      const srcDoc = await PDFDocument.load(buf);
+      const embeddedPage = await outDoc.embedPage(srcDoc.getPage(0));
+      srcPages.push(embeddedPage);
+      setProgress(5 + Math.round((i / files.length) * 40), `读取发票 ${i+1}/${files.length}...`);
+    }
+
+    // Pair up and place
+    const pairCount = Math.ceil(srcPages.length / 2);
+    for (let p = 0; p < pairCount; p++) {
+      const pageA = srcPages[p * 2];
+      const pageB = srcPages[p * 2 + 1] || null;
+
+      const outPage = outDoc.addPage([outW, outH]);
+
+      const slot = (slotIdx, srcPage) => {
+        const { width: sw, height: sh } = srcPage;
+        let slotW, slotH, ox, oy;
+
+        if (dir === 'horizontal') {
+          slotW = (outW - GAP - 2 * MARGIN) / 2;
+          slotH = outH - 2 * MARGIN;
+          ox = slotIdx === 0 ? MARGIN : MARGIN + slotW + GAP;
+          oy = MARGIN;
+        } else {
+          slotW = outW - 2 * MARGIN;
+          slotH = (outH - GAP - 2 * MARGIN) / 2;
+          ox = MARGIN;
+          oy = slotIdx === 0 ? MARGIN + slotH + GAP : MARGIN;
+        }
+
+        let scale;
+        if (scaleMode === 'fit') {
+          scale = Math.min(slotW / sw, slotH / sh);
+        } else {
+          scale = parseFloat(scaleMode) / 100;
+        }
+
+        const scaledW = sw * scale;
+        const scaledH = sh * scale;
+        const cx = ox + (slotW - scaledW) / 2;
+        const cy = oy + (slotH - scaledH) / 2;
+
+        outPage.drawPage(srcPage, { x: cx, y: cy, width: scaledW, height: scaledH });
+      };
+
+      slot(0, pageA);
+      if (pageB) slot(1, pageB);
+
+      setProgress(45 + Math.round((p / pairCount) * 50), `排版第 ${p+1}/${pairCount} 页...`);
+    }
+
+    setProgress(97, '生成 PDF...');
+    const pdfBytes = await outDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `发票排版_${files.length}张_${new Date().toLocaleDateString('zh-CN').replace(/\//g,'-')}.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    setProgress(100, `✅ 完成！共 ${pairCount} 页，包含 ${files.length} 张发票`);
+    showToast(`🎉 生成成功！${pairCount} 页 PDF 已下载`);
+  } catch (err) {
+    console.error(err);
+    showToast('生成失败：' + err.message, true);
+    progressText.textContent = '❌ 生成失败：' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// --- Toast ---
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isError ? ' error' : '');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+updatePreview();
+</script>
+</body>
+</html>

@@ -22,7 +22,13 @@ open index.html
 
 ## 在线访问
 
-GitHub Pages 部署后可通过仓库的 Pages 地址直接使用。
+在线工具地址：
+
+https://lichang333.github.io/invoice-formatter/
+
+GitHub 仓库地址：
+
+https://github.com/lichang333/invoice-formatter
 
 ## 技术说明
 

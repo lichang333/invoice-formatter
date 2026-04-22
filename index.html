@@ -569,11 +569,12 @@
       <div class="setting-item">
         <label>缩放比例</label>
         <select id="scaleMode">
-          <option value="48" selected>固定 48%（默认）</option>
+          <option value="fit-96" selected>自动适合 96%（默认）</option>
+          <option value="fit">自动适合 100%（最大）</option>
+          <option value="50">固定 50%</option>
+          <option value="48">固定 48%</option>
           <option value="45">固定 45%</option>
           <option value="42">固定 42%</option>
-          <option value="50">固定 50%</option>
-          <option value="fit">自动适合（最大）</option>
         </select>
       </div>
     </div>
@@ -907,8 +908,9 @@ async function generate() {
         }
 
         let scale;
-        if (scaleMode === 'fit') {
-          scale = Math.min(slotW / sw, slotH / sh);
+        if (scaleMode === 'fit' || scaleMode === 'fit-96') {
+          const fitScale = Math.min(slotW / sw, slotH / sh);
+          scale = scaleMode === 'fit-96' ? fitScale * 0.96 : fitScale;
         } else {
           scale = parseFloat(scaleMode) / 100;
         }

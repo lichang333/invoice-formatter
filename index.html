@@ -136,6 +136,52 @@
     font-family: 'Space Mono', monospace;
   }
 
+  /* Link Import */
+  .link-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+    margin-top: 16px;
+  }
+  .link-panel h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .link-panel p {
+    color: var(--ink-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+  .link-form {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .link-input {
+    min-height: 46px;
+    resize: vertical;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 13px;
+    font-family: 'Noto Sans SC', sans-serif;
+    color: var(--ink);
+    outline: none;
+  }
+  .link-input:focus { border-color: var(--accent); }
+  .link-status {
+    min-height: 18px;
+    margin-top: 10px;
+    color: var(--ink-muted);
+    font-size: 12px;
+    font-family: 'Space Mono', monospace;
+  }
+
   /* File List */
   .section-title {
     font-size: 13px;
@@ -201,6 +247,9 @@
     font-size: 11px;
     color: var(--ink-muted);
     font-family: 'Space Mono', monospace;
+  }
+  .file-origin {
+    color: var(--accent);
   }
   .file-remove {
     position: absolute;
@@ -435,6 +484,7 @@
     header { padding: 16px 20px; }
     main { padding: 24px 16px; }
     .settings-row { flex-direction: column; align-items: flex-start; gap: 16px; }
+    .link-form { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -462,6 +512,19 @@
     <h2>上传电子发票 PDF</h2>
     <p>支持批量上传多张发票，每张发票为独立 PDF 文件<br>拖拽或点击选择文件</p>
     <div class="hint">↑ CLICK OR DRAG &amp; DROP · PDF ONLY</div>
+  </div>
+
+  <!-- Link Import -->
+  <div class="link-panel">
+    <h2>粘贴发票链接</h2>
+    <p>支持每行一个 PDF 链接。链接源需要允许浏览器跨域读取；如果平台拦截，请下载后上传。</p>
+    <div class="link-form">
+      <textarea class="link-input" id="linkInput" placeholder="https://example.com/invoice-001.pdf"></textarea>
+      <button class="btn btn-secondary" id="importLinkBtn" onclick="importLinks()">
+        <span>＋</span> 添加链接
+      </button>
+    </div>
+    <div class="link-status" id="linkStatus"></div>
   </div>
 
   <!-- File List -->
@@ -558,7 +621,7 @@
 const { PDFDocument, degrees } = PDFLib;
 
 // State
-let files = []; // Array of {file, name, size}
+let files = []; // Array of {file, name, size, origin, url}
 
 // PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -566,6 +629,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // --- Upload Handling ---
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
+const linkInput = document.getElementById('linkInput');
+const importLinkBtn = document.getElementById('importLinkBtn');
+const linkStatus = document.getElementById('linkStatus');
 
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
@@ -580,15 +646,103 @@ fileInput.addEventListener('change', () => {
 });
 
 function addFiles(newFiles) {
-  const pdfs = newFiles.filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
+  const pdfs = newFiles.filter(isPdfFile);
   if (pdfs.length === 0) { showToast('请上传 PDF 格式的发票文件', true); return; }
   pdfs.forEach(f => {
     if (!files.find(x => x.name === f.name && x.size === f.size)) {
-      files.push({ file: f, name: f.name, size: f.size });
+      files.push({ file: f, name: f.name, size: f.size, origin: 'upload' });
     }
   });
   renderFileList();
   showToast(`已添加 ${pdfs.length} 张发票`);
+}
+
+async function importLinks() {
+  const urls = extractUrls(linkInput.value);
+  if (urls.length === 0) {
+    showToast('请粘贴 PDF 链接', true);
+    return;
+  }
+
+  importLinkBtn.disabled = true;
+  linkStatus.textContent = `正在读取 0/${urls.length}...`;
+
+  let added = 0;
+  const failed = [];
+
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    linkStatus.textContent = `正在读取 ${i + 1}/${urls.length}...`;
+
+    try {
+      const file = await fetchPdfFromUrl(url, i + 1);
+      if (!files.find(x => x.url === url || (x.name === file.name && x.size === file.size))) {
+        files.push({ file, name: file.name, size: file.size, origin: 'link', url });
+        added++;
+      }
+    } catch (err) {
+      failed.push(shortenUrl(url));
+      console.error(err);
+    }
+  }
+
+  importLinkBtn.disabled = false;
+  linkStatus.textContent = failed.length > 0
+    ? `已添加 ${added} 个链接，失败 ${failed.length} 个`
+    : `已添加 ${added} 个链接`;
+
+  if (added > 0) {
+    renderFileList();
+    linkInput.value = '';
+    showToast(`已从链接添加 ${added} 张发票`);
+  }
+
+  if (failed.length > 0) {
+    showToast('部分链接无法读取，可能被跨域策略拦截', true);
+  }
+}
+
+function extractUrls(text) {
+  return [...new Set((text.match(/https?:\/\/[^\s，,]+/g) || [])
+    .map(url => url.replace(/[)\]}>。；;]+$/g, '')))];
+}
+
+async function fetchPdfFromUrl(url, index) {
+  const res = await fetch(url, { mode: 'cors' });
+  if (!res.ok) {
+    throw new Error(`链接读取失败：${res.status}`);
+  }
+
+  const buffer = await res.arrayBuffer();
+  const contentType = res.headers.get('content-type') || '';
+  const header = String.fromCharCode(...new Uint8Array(buffer.slice(0, 5)));
+  const looksLikePdf = contentType.includes('pdf') || /\.pdf($|[?#])/i.test(url) || header === '%PDF-';
+  if (!looksLikePdf) {
+    throw new Error('链接不是 PDF 文件');
+  }
+
+  const filename = getFilenameFromUrl(url) || `发票链接_${String(index).padStart(2, '0')}.pdf`;
+  return new File([buffer], /\.pdf$/i.test(filename) ? filename : `${filename}.pdf`, {
+    type: 'application/pdf'
+  });
+}
+
+function getFilenameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
+    return name.replace(/[\\/:*?"<>|]/g, '_');
+  } catch {
+    return '';
+  }
+}
+
+function isPdfFile(file) {
+  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+}
+
+function shortenUrl(url) {
+  return url.length > 42 ? url.slice(0, 39) + '...' : url;
 }
 
 function removeFile(idx) {
@@ -617,8 +771,8 @@ function renderFileList() {
     <div class="file-card">
       <div class="num">${String(i+1).padStart(2,'0')}</div>
       <div class="file-info">
-        <div class="file-name" title="${f.name}">${f.name}</div>
-        <div class="file-size">${formatSize(f.size)}</div>
+        <div class="file-name" title="${escapeHTML(f.name)}">${escapeHTML(f.name)}</div>
+        <div class="file-size">${formatSize(f.size)} · <span class="file-origin">${f.origin === 'link' ? '链接' : '上传'}</span></div>
       </div>
       <button class="file-remove" onclick="removeFile(${i})" title="移除">×</button>
     </div>
@@ -633,6 +787,16 @@ function renderFileList() {
   document.getElementById('statSaved').textContent = saved + '%';
 
   updatePreview();
+}
+
+function escapeHTML(str) {
+  return String(str).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
 }
 
 // Update schematic preview

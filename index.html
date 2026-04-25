@@ -517,7 +517,7 @@
   <!-- Link Import -->
   <div class="link-panel">
     <h2>粘贴发票链接</h2>
-    <p>支持每行一个 PDF 链接。链接源需要允许浏览器跨域读取；如果平台拦截，请下载后上传。</p>
+    <p>支持每行一个 PDF 链接。注意：京东云、阿里云、腾讯云等平台的预签名下载链接<strong>不支持</strong>直接读取（浏览器跨域限制），请先下载到本地再上传。</p>
     <div class="link-form">
       <textarea class="link-input" id="linkInput" placeholder="https://example.com/invoice-001.pdf"></textarea>
       <button class="btn btn-secondary" id="importLinkBtn" onclick="importLinks()">
@@ -621,7 +621,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <script>
-const { PDFDocument, degrees } = PDFLib;
+const { PDFDocument, degrees, PDFName, PDFArray } = PDFLib;
 
 // State
 let files = []; // Array of {file, name, size, origin, url}
@@ -701,7 +701,7 @@ async function importLinks() {
   }
 
   if (failed.length > 0) {
-    showToast('部分链接无法读取，可能被跨域策略拦截', true);
+    showToast('链接读取失败：该平台预签名链接不支持浏览器直接获取，请下载后上传', true);
   }
 }
 
@@ -872,14 +872,67 @@ async function generate() {
 
     const outDoc = await PDFDocument.create();
 
+    // Helper: embed as vector PDF; fall back to PDF.js rasterization if that fails.
+    // NOTE: pdf-lib's embedPage is LAZY — embedIntoContext only runs at save() time,
+    // so errors only surface then. We use a probe doc to force early validation.
+    async function loadEmbeddable(buf) {
+      const bytes = new Uint8Array(buf.slice(0)); // keep own copy
+
+      try {
+        const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        const srcPage = srcDoc.getPage(0);
+
+        // Patch missing/null /Contents
+        try {
+          const ck = PDFName.of('Contents');
+          if (!srcPage.node.has(ck) || !srcPage.node.get(ck)) {
+            srcPage.node.set(ck, srcDoc.context.register(srcDoc.context.stream('')));
+          }
+        } catch (_) {}
+
+        // Force early validation: embed + save to a throw-away doc.
+        // This triggers embedIntoContext() immediately so any error is caught here.
+        const probe = await PDFDocument.create();
+        const probeEmb = await probe.embedPage(srcPage);
+        const probePage = probe.addPage([probeEmb.width, probeEmb.height]);
+        probePage.drawPage(probeEmb, { x: 0, y: 0, width: probeEmb.width, height: probeEmb.height });
+        await probe.save(); // throws here if page is invalid
+
+        // Validation passed → embed into real output doc
+        const embedded = await outDoc.embedPage(srcPage);
+        return { kind: 'page', embedded, width: embedded.width, height: embedded.height };
+      } catch (vecErr) {
+        console.warn('Vector embed failed — rasterizing via PDF.js:', vecErr.message);
+      }
+
+      // PDF.js rasterization fallback
+      try {
+        const pdfJsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        const page = await pdfJsDoc.getPage(1);
+        const vp = page.getViewport({ scale: 3.0 }); // ~216 DPI
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(vp.width);
+        canvas.height = Math.round(vp.height);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        const pngBytes = await new Promise((res, rej) => {
+          canvas.toBlob(
+            b => b ? b.arrayBuffer().then(ab => res(new Uint8Array(ab))) : rej(new Error('toBlob failed')),
+            'image/png'
+          );
+        });
+        const embedded = await outDoc.embedPng(pngBytes);
+        return { kind: 'image', embedded, width: vp.width, height: vp.height };
+      } catch (rasterErr) {
+        throw new Error(`无法处理此 PDF（向量嵌入和光栅化均失败）：${rasterErr.message}`);
+      }
+    }
+
     // Load all source PDFs
     setProgress(5, '正在读取发票文件...');
     const srcPages = [];
     for (let i = 0; i < files.length; i++) {
       const buf = await files[i].file.arrayBuffer();
-      const srcDoc = await PDFDocument.load(buf);
-      const embeddedPage = await outDoc.embedPage(srcDoc.getPage(0));
-      srcPages.push(embeddedPage);
+      srcPages.push(await loadEmbeddable(buf));
       setProgress(5 + Math.round((i / files.length) * 40), `读取发票 ${i+1}/${files.length}...`);
     }
 
@@ -891,8 +944,8 @@ async function generate() {
 
       const outPage = outDoc.addPage([outW, outH]);
 
-      const slot = (slotIdx, srcPage) => {
-        const { width: sw, height: sh } = srcPage;
+      const slot = (slotIdx, item) => {
+        const { width: sw, height: sh } = item;
         let slotW, slotH, ox, oy;
 
         if (dir === 'horizontal') {
@@ -920,7 +973,11 @@ async function generate() {
         const cx = ox + (slotW - scaledW) / 2;
         const cy = oy + (slotH - scaledH) / 2;
 
-        outPage.drawPage(srcPage, { x: cx, y: cy, width: scaledW, height: scaledH });
+        if (item.kind === 'image') {
+          outPage.drawImage(item.embedded, { x: cx, y: cy, width: scaledW, height: scaledH });
+        } else {
+          outPage.drawPage(item.embedded, { x: cx, y: cy, width: scaledW, height: scaledH });
+        }
       };
 
       slot(0, pageA);
@@ -942,9 +999,10 @@ async function generate() {
     setProgress(100, `✅ 完成！共 ${pairCount} 页，包含 ${files.length} 张发票`);
     showToast(`🎉 生成成功！${pairCount} 页 PDF 已下载`);
   } catch (err) {
-    console.error(err);
-    showToast('生成失败：' + err.message, true);
-    progressText.textContent = '❌ 生成失败：' + err.message;
+    console.error('Generate error:', err);
+    const msg = err.message || String(err);
+    showToast('生成失败：' + msg, true);
+    progressText.textContent = '❌ 生成失败：' + msg;
   } finally {
     btn.disabled = false;
   }

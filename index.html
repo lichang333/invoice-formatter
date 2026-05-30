@@ -559,6 +559,13 @@
         </select>
       </div>
       <div class="setting-item">
+        <label>渲染模式</label>
+        <select id="renderMode">
+          <option value="image" selected>图片高保真（含红章，推荐）</option>
+          <option value="vector">矢量模式（无红章，文件小）</option>
+        </select>
+      </div>
+      <div class="setting-item">
         <label>页边距</label>
         <input type="number" id="marginPx" value="12" min="0" max="30"> mm
       </div>
@@ -857,6 +864,7 @@ async function generate() {
     const gap = parseFloat(document.getElementById('gapPx').value) || 4; // mm
     const margin = parseFloat(document.getElementById('marginPx').value) || 0; // mm
     const scaleMode = document.getElementById('scaleMode').value;
+    const renderMode = document.getElementById('renderMode').value;
 
     // A4 dimensions in points (1pt = 1/72 inch; 1mm = 2.8346pt)
     const mm = 2.8346;
@@ -872,48 +880,59 @@ async function generate() {
 
     const outDoc = await PDFDocument.create();
 
-    // Helper: embed as vector PDF; fall back to PDF.js rasterization if that fails.
-    // NOTE: pdf-lib's embedPage is LAZY — embedIntoContext only runs at save() time,
-    // so errors only surface then. We use a probe doc to force early validation.
+    // Helper: load page as vector or image depending on renderMode
     async function loadEmbeddable(buf) {
       const bytes = new Uint8Array(buf.slice(0)); // keep own copy
 
-      try {
-        const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-        const srcPage = srcDoc.getPage(0);
-
-        // Patch missing/null /Contents
+      if (renderMode === 'vector') {
         try {
-          const ck = PDFName.of('Contents');
-          if (!srcPage.node.has(ck) || !srcPage.node.get(ck)) {
-            srcPage.node.set(ck, srcDoc.context.register(srcDoc.context.stream('')));
-          }
-        } catch (_) {}
+          const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+          const srcPage = srcDoc.getPage(0);
 
-        // Force early validation: embed + save to a throw-away doc.
-        // This triggers embedIntoContext() immediately so any error is caught here.
-        const probe = await PDFDocument.create();
-        const probeEmb = await probe.embedPage(srcPage);
-        const probePage = probe.addPage([probeEmb.width, probeEmb.height]);
-        probePage.drawPage(probeEmb, { x: 0, y: 0, width: probeEmb.width, height: probeEmb.height });
-        await probe.save(); // throws here if page is invalid
+          // Patch missing/null /Contents
+          try {
+            const ck = PDFName.of('Contents');
+            if (!srcPage.node.has(ck) || !srcPage.node.get(ck)) {
+              srcPage.node.set(ck, srcDoc.context.register(srcDoc.context.stream('')));
+            }
+          } catch (_) {}
 
-        // Validation passed → embed into real output doc
-        const embedded = await outDoc.embedPage(srcPage);
-        return { kind: 'page', embedded, width: embedded.width, height: embedded.height };
-      } catch (vecErr) {
-        console.warn('Vector embed failed — rasterizing via PDF.js:', vecErr.message);
+          // Force early validation: embed + save to a throw-away doc.
+          // This triggers embedIntoContext() immediately so any error is caught here.
+          const probe = await PDFDocument.create();
+          const probeEmb = await probe.embedPage(srcPage);
+          const probePage = probe.addPage([probeEmb.width, probeEmb.height]);
+          probePage.drawPage(probeEmb, { x: 0, y: 0, width: probeEmb.width, height: probeEmb.height });
+          await probe.save(); // throws here if page is invalid
+
+          // Validation passed → embed into real output doc
+          const embedded = await outDoc.embedPage(srcPage);
+          return { kind: 'page', embedded, width: embedded.width, height: embedded.height };
+        } catch (vecErr) {
+          console.warn('Vector embed failed — rasterizing via PDF.js:', vecErr.message);
+        }
       }
 
-      // PDF.js rasterization fallback
+      // PDF.js rasterization (used for Image Mode or as fallback for Vector Mode)
       try {
-        const pdfJsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+        const pdfJsDoc = await pdfjsLib.getDocument({
+          data: bytes.slice(0),
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+        }).promise;
         const page = await pdfJsDoc.getPage(1);
         const vp = page.getViewport({ scale: 3.0 }); // ~216 DPI
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(vp.width);
         canvas.height = Math.round(vp.height);
-        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        
+        await page.render({
+          canvasContext: canvas.getContext('2d'),
+          viewport: vp,
+          intent: 'print',
+          annotationMode: pdfjsLib?.AnnotationMode?.ENABLE_STORAGE ?? 3
+        }).promise;
+
         const pngBytes = await new Promise((res, rej) => {
           canvas.toBlob(
             b => b ? b.arrayBuffer().then(ab => res(new Uint8Array(ab))) : rej(new Error('toBlob failed')),
@@ -923,7 +942,7 @@ async function generate() {
         const embedded = await outDoc.embedPng(pngBytes);
         return { kind: 'image', embedded, width: vp.width, height: vp.height };
       } catch (rasterErr) {
-        throw new Error(`无法处理此 PDF（向量嵌入和光栅化均失败）：${rasterErr.message}`);
+        throw new Error(`无法处理此 PDF（光栅化失败）：${rasterErr.message}`);
       }
     }
 
